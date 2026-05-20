@@ -1,12 +1,11 @@
-import socketio
-import time
+import asyncio
 import random
-import threading
 from datetime import datetime
+import socketio
 from error_loader import load_error_codes, filter_equipment_errors
 
-# Socket.IO 클라이언트 설정
-sio = socketio.Client()
+# 🚀 성능 최적화: 비동기 Socket.IO 클라이언트 (스레드 대신 이벤트 루프 사용)
+sio = socketio.AsyncClient()
 
 # 관리자 PC 서버 주소 (로컬 테스트용)
 SERVER_URL = 'http://localhost:5000'
@@ -149,9 +148,9 @@ def generate_ng_payload(device_id, batch_id, model_name, seq):
 device_locked = {}   # { "RASP_PI_01": True/False }
 
 
-# ── 장비 시뮬레이션 메인 로직 ──
-def simulate_machine(device_id, batch_id, model_name):
-    """스레드 1개가 담당할 '가상 장비 1대'의 동작 로직"""
+# ── 🚀 비동기 장비 시뮬레이션 메인 로직 ──
+async def simulate_machine(device_id, batch_id, model_name):
+    """asyncio Task가 담당할 '가상 장비 1대'의 동작 로직 (비동기)"""
     print(f"[{device_id}] 개별 가동 시작 (모델: {model_name})...")
 
     for i in range(1, 101):
@@ -166,14 +165,14 @@ def simulate_machine(device_id, batch_id, model_name):
         else:
             payload = generate_ng_payload(device_id, batch_id, model_name, i)
 
-        # 서버로 실시간 데이터 전송
-        sio.emit('device_data', payload)
+        # 서버로 실시간 데이터 전송 (비동기 emit)
+        await sio.emit('device_data', payload)
 
-        # 실제 공정 속도 체감을 위한 지연 시간 (0.1초)
-        time.sleep(0.1)
+        # 🚀 asyncio.sleep으로 이벤트 루프 양보 (다른 장비도 동시 실행 가능)
+        await asyncio.sleep(0.1)
 
     # 100개 완료 후 장비별 완료 신호 전송
-    sio.emit('batch_complete', {
+    await sio.emit('batch_complete', {
         "device_id": device_id,
         "batch_id": batch_id,
         "model_name": model_name,
@@ -183,29 +182,28 @@ def simulate_machine(device_id, batch_id, model_name):
 
 
 @sio.event
-def connect():
+async def connect():
     print("✅ 관리자 PC 서버에 연결되었습니다.")
 
 
 # 관리자 PC에서 특정 장비의 검사 시작 명령이 들어왔을 때 실행
 @sio.on('start_request')
-def on_start(data):
+async def on_start(data):
     target_device = data.get('device_id', 'UNKNOWN_DEVICE')
     batch_id = data.get('batch_id', 'BATCH_DEFAULT')
     model_name = data.get('model_name', 'MODEL_DEFAULT')
 
     print(f"\n--- [{target_device}] 검사 시작 명령 수신 (모델: {model_name}) ---")
 
-    t = threading.Thread(
-        target=simulate_machine,
-        args=(target_device, batch_id, model_name)
+    # 🚀 스레드 대신 asyncio Task로 장비 시뮬레이션 실행 (GIL 경합 없음)
+    asyncio.create_task(
+        simulate_machine(target_device, batch_id, model_name)
     )
-    t.start()
 
 
 # ── 서버로부터 장비 잠금 명령 수신 (CRITICAL 오류 발생 시) ──
 @sio.on('device_lock')
-def on_device_lock(data):
+async def on_device_lock(data):
     device_id = data.get('device_id')
     device_locked[device_id] = True
     print(f"🔒 [{device_id}] 서버로부터 긴급 정지 명령 수신! 장비 잠금됨.")
@@ -213,7 +211,7 @@ def on_device_lock(data):
 
 # ── 서버로부터 장비 잠금 해제 명령 수신 (모바일 앱에서 확인 시) ──
 @sio.on('device_unlock')
-def on_device_unlock(data):
+async def on_device_unlock(data):
     device_id = data.get('device_id')
     resolved_by = data.get('resolved_by', '알 수 없음')
     device_locked[device_id] = False
@@ -221,15 +219,19 @@ def on_device_unlock(data):
 
 
 @sio.event
-def disconnect():
+async def disconnect():
     print("❌ 관리자 PC 서버와 연결이 끊어졌습니다.")
 
 
-# 메인 실행부: 서버 연결 시도 및 대기
-if __name__ == '__main__':
+# 메인 실행부: 비동기 이벤트 루프로 서버 연결 및 대기
+async def main():
     try:
         print(f"서버({SERVER_URL}) 접속 시도 중...")
-        sio.connect(SERVER_URL)
-        sio.wait()
+        await sio.connect(SERVER_URL)
+        await sio.wait()
     except Exception as e:
         print(f"연결 실패: {e}")
+
+
+if __name__ == '__main__':
+    asyncio.run(main())
