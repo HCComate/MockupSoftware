@@ -1,4 +1,8 @@
+import os
 import asyncio
+from dotenv import load_dotenv
+
+load_dotenv()
 import random
 from datetime import datetime
 import socketio
@@ -7,8 +11,9 @@ from error_loader import load_error_codes, filter_equipment_errors
 # 🚀 성능 최적화: 비동기 Socket.IO 클라이언트 (스레드 대신 이벤트 루프 사용)
 sio = socketio.AsyncClient()
 
-# 관리자 PC 서버 주소 (로컬 테스트용)
-SERVER_URL = 'http://localhost:5000'
+# 관리자 PC 서버 주소 및 이미지 호스트 (환경 변수 적용)
+SERVER_URL = os.getenv('ADMIN_SERVER_URL', 'http://localhost:5000')
+IMAGE_HOST_URL = os.getenv('IMAGE_HOST_URL', 'http://192.168.0.15')
 
 # ── CSV에서 에러 코드 로드 ──
 ALL_ERRORS = load_error_codes()                          # 전체 50개
@@ -67,6 +72,7 @@ def generate_ok_payload(device_id, batch_id, model_name, seq):
             },
             "sensor_data": {
                 "temperature": round(random.uniform(35.0, 42.0), 1),
+                "humidity": round(random.uniform(40.0, 55.0), 1),
                 "vibration_x": round(random.uniform(0.005, 0.03), 3),
                 "vibration_y": round(random.uniform(0.005, 0.03), 3),
                 "illumination": random.randint(1150, 1300)
@@ -131,10 +137,11 @@ def generate_ng_payload(device_id, batch_id, model_name, seq):
                 "defect_type": defect_type,
                 "confidence": round(random.uniform(0.70, 0.95), 2),
                 "inspection_area": random.choice(ZONES),
-                "image_url": f"http://192.168.0.15/images/{seq}_ng_{defect_type.lower()}.jpg"
+                "image_url": f"{IMAGE_HOST_URL}/images/{seq}_ng_{defect_type.lower()}.jpg"
             },
             "sensor_data": {
                 "temperature": round(random.uniform(*temp_range), 1),
+                "humidity": round(random.uniform(55.0, 80.0) if is_critical else random.uniform(40.0, 60.0), 1),
                 "vibration_x": round(random.uniform(*vib_range), 3),
                 "vibration_y": round(random.uniform(*vib_range), 3),
                 "illumination": random.randint(900, 1200)
@@ -147,8 +154,11 @@ def generate_ng_payload(device_id, batch_id, model_name, seq):
 # ── 장비별 잠금 플래그 (CRITICAL 오류 시 서버에서 잠금 명령 수신) ──
 device_locked = {}   # { "RASP_PI_01": True/False }
 
+# ── 연속 가동 장비 종료 플래그 ──
+device_stop_requested = {}   # { "CONT_PI_01": True/False }
 
-# ── 🚀 비동기 장비 시뮬레이션 메인 로직 ──
+
+# ── 🚀 비동기 장비 시뮬레이션 메인 로직 (100개 한정) ──
 async def simulate_machine(device_id, batch_id, model_name):
     """asyncio Task가 담당할 '가상 장비 1대'의 동작 로직 (비동기)"""
     print(f"[{device_id}] 개별 가동 시작 (모델: {model_name})...")
@@ -181,6 +191,42 @@ async def simulate_machine(device_id, batch_id, model_name):
     print(f"[{device_id}] 검사 완료!")
 
 
+# ── 🔄 연속 가동 장비 시뮬레이션 (종료 버튼 누를 때까지 무한 반복) ──
+async def simulate_continuous(device_id, batch_id, model_name):
+    """종료 신호가 올 때까지 무한으로 검사 데이터를 생성하는 연속 가동 장비"""
+    print(f"🔄 [{device_id}] 연속 가동 시작 (모델: {model_name})...")
+    device_stop_requested[device_id] = False
+    seq = 0
+
+    while True:
+        # ⚡ 종료 요청 확인
+        if device_stop_requested.get(device_id, False):
+            print(f"⏹️ [{device_id}] 종료 요청 수신. 연속 가동 중단. (총 {seq}건)")
+            device_stop_requested[device_id] = False
+            # 서버에 종료 완료 알림
+            await sio.emit('continuous_stopped', {
+                "device_id": device_id,
+                "total_count": seq
+            })
+            return
+
+        # ⚡ 잠금 체크
+        if device_locked.get(device_id, False):
+            print(f"🛑 [{device_id}] CRITICAL 오류로 연속 가동 강제 중단됨 (총 {seq}건)")
+            return
+
+        seq += 1
+
+        # 98% 확률로 OK, 2% 확률로 NG 판정
+        if random.random() > 0.02:
+            payload = generate_ok_payload(device_id, batch_id, model_name, seq)
+        else:
+            payload = generate_ng_payload(device_id, batch_id, model_name, seq)
+
+        await sio.emit('device_data', payload)
+        await asyncio.sleep(0.5)  # 연속 장비는 0.5초 간격 (서버 부하 방지)
+
+
 @sio.event
 async def connect():
     print("✅ 관리자 PC 서버에 연결되었습니다.")
@@ -199,6 +245,28 @@ async def on_start(data):
     asyncio.create_task(
         simulate_machine(target_device, batch_id, model_name)
     )
+
+
+# ── 연속 가동 장비 시작 명령 수신 ──
+@sio.on('start_continuous')
+async def on_start_continuous(data):
+    target_device = data.get('device_id', 'UNKNOWN_DEVICE')
+    batch_id = data.get('batch_id', 'BATCH_DEFAULT')
+    model_name = data.get('model_name', 'MODEL_DEFAULT')
+
+    print(f"\n🔄 [{target_device}] 연속 가동 시작 명령 수신 (모델: {model_name})")
+
+    asyncio.create_task(
+        simulate_continuous(target_device, batch_id, model_name)
+    )
+
+
+# ── 연속 가동 장비 종료 명령 수신 ──
+@sio.on('stop_continuous')
+async def on_stop_continuous(data):
+    device_id = data.get('device_id')
+    device_stop_requested[device_id] = True
+    print(f"⏹️ [{device_id}] 종료 명령 수신됨. 현재 작업 완료 후 중단 예정...")
 
 
 # ── 서버로부터 장비 잠금 명령 수신 (CRITICAL 오류 발생 시) ──

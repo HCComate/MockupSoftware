@@ -1,3 +1,4 @@
 # ── 라즈베리 파이 (Raspi) ──
 python-socketio[asyncio_client] # 비동기 Socket.IO 클라이언트
 aiohttp                        # AsyncClient 전송 계층
+python-dotenv                  # 환경 변수 관리
