@@ -13,7 +13,7 @@ sio = socketio.AsyncClient()
 
 # 관리자 PC 서버 주소 및 이미지 호스트 (환경 변수 적용)
 SERVER_URL = os.getenv('ADMIN_SERVER_URL', 'http://localhost:5000')
-IMAGE_HOST_URL = os.getenv('IMAGE_HOST_URL', 'http://192.168.0.15')
+IMAGE_HOST_URL = os.getenv('IMAGE_HOST_URL', SERVER_URL)
 
 # ── CSV에서 에러 코드 로드 ──
 ALL_ERRORS = load_error_codes()                          # 전체 50개
@@ -68,7 +68,7 @@ def generate_ok_payload(device_id, batch_id, model_name, seq):
                 "defect_type": "NONE",
                 "confidence": round(random.uniform(0.95, 0.99), 2),
                 "inspection_area": "ALL",
-                "image_url": None
+                "image_url": f"{IMAGE_HOST_URL}/static/vision_images/vision_ok.png"
             },
             "sensor_data": {
                 "temperature": round(random.uniform(35.0, 42.0), 1),
@@ -137,7 +137,7 @@ def generate_ng_payload(device_id, batch_id, model_name, seq):
                 "defect_type": defect_type,
                 "confidence": round(random.uniform(0.70, 0.95), 2),
                 "inspection_area": random.choice(ZONES),
-                "image_url": f"{IMAGE_HOST_URL}/images/{seq}_ng_{defect_type.lower()}.jpg"
+                "image_url": f"{IMAGE_HOST_URL}/static/vision_images/vision_{defect_type.lower()}.png"
             },
             "sensor_data": {
                 "temperature": round(random.uniform(*temp_range), 1),
