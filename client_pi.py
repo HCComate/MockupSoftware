@@ -68,7 +68,7 @@ def generate_ok_payload(device_id, batch_id, model_name, seq):
                 "defect_type": "NONE",
                 "confidence": round(random.uniform(0.95, 0.99), 2),
                 "inspection_area": "ALL",
-                "image_url": f"{IMAGE_HOST_URL}/static/vision_images/vision_ok.png"
+                "image_url": f"{IMAGE_HOST_URL}/static/images/vision_ok.png"
             },
             "sensor_data": {
                 "temperature": round(random.uniform(35.0, 42.0), 1),
@@ -137,7 +137,7 @@ def generate_ng_payload(device_id, batch_id, model_name, seq):
                 "defect_type": defect_type,
                 "confidence": round(random.uniform(0.70, 0.95), 2),
                 "inspection_area": random.choice(ZONES),
-                "image_url": f"{IMAGE_HOST_URL}/static/vision_images/vision_{defect_type.lower()}.png"
+                "image_url": f"{IMAGE_HOST_URL}/static/images/vision_{defect_type.lower()}.png"
             },
             "sensor_data": {
                 "temperature": round(random.uniform(*temp_range), 1),
