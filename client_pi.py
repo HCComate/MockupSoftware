@@ -158,37 +158,7 @@ device_locked = {}   # { "RASP_PI_01": True/False }
 device_stop_requested = {}   # { "CONT_PI_01": True/False }
 
 
-# ── 🚀 비동기 장비 시뮬레이션 메인 로직 (100개 한정) ──
-async def simulate_machine(device_id, batch_id, model_name):
-    """asyncio Task가 담당할 '가상 장비 1대'의 동작 로직 (비동기)"""
-    print(f"[{device_id}] 개별 가동 시작 (모델: {model_name})...")
 
-    for i in range(1, 101):
-        # ⚡ 잠금 체크: 서버에서 CRITICAL 잠금 명령이 오면 즉시 검사 중단
-        if device_locked.get(device_id, False):
-            print(f"🛑 [{device_id}] CRITICAL 오류로 검사 강제 중단됨 ({i-1}/100)")
-            return  # batch_complete를 보내지 않고 종료
-
-        # 98% 확률로 OK, 2% 확률로 NG 판정
-        if random.random() > 0.02:
-            payload = generate_ok_payload(device_id, batch_id, model_name, i)
-        else:
-            payload = generate_ng_payload(device_id, batch_id, model_name, i)
-
-        # 서버로 실시간 데이터 전송 (비동기 emit)
-        await sio.emit('device_data', payload)
-
-        # 🚀 asyncio.sleep으로 이벤트 루프 양보 (다른 장비도 동시 실행 가능)
-        await asyncio.sleep(0.1)
-
-    # 100개 완료 후 장비별 완료 신호 전송
-    await sio.emit('batch_complete', {
-        "device_id": device_id,
-        "batch_id": batch_id,
-        "model_name": model_name,
-        "status": "FINISHED"
-    })
-    print(f"[{device_id}] 검사 완료!")
 
 
 # ── 🔄 연속 가동 장비 시뮬레이션 (종료 버튼 누를 때까지 무한 반복) ──
@@ -232,19 +202,7 @@ async def connect():
     print("✅ 관리자 PC 서버에 연결되었습니다.")
 
 
-# 관리자 PC에서 특정 장비의 검사 시작 명령이 들어왔을 때 실행
-@sio.on('start_request')
-async def on_start(data):
-    target_device = data.get('device_id', 'UNKNOWN_DEVICE')
-    batch_id = data.get('batch_id', 'BATCH_DEFAULT')
-    model_name = data.get('model_name', 'MODEL_DEFAULT')
 
-    print(f"\n--- [{target_device}] 검사 시작 명령 수신 (모델: {model_name}) ---")
-
-    # 🚀 스레드 대신 asyncio Task로 장비 시뮬레이션 실행 (GIL 경합 없음)
-    asyncio.create_task(
-        simulate_machine(target_device, batch_id, model_name)
-    )
 
 
 # ── 연속 가동 장비 시작 명령 수신 ──
