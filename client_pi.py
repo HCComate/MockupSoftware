@@ -187,8 +187,8 @@ async def simulate_continuous(device_id, batch_id, model_name):
 
         seq += 1
 
-        # 98% 확률로 OK, 2% 확률로 NG 판정
-        if random.random() > 0.02:
+        # 99.5% 확률로 OK, 0.5% 확률로 NG 판정
+        if random.random() > 0.005:
             payload = generate_ok_payload(device_id, batch_id, model_name, seq)
         else:
             payload = generate_ng_payload(device_id, batch_id, model_name, seq)
